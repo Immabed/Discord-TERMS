@@ -77,7 +77,6 @@ function activateBot() {
                 }
             }
             else merged = "";
-            logger.log('debug', merged);
             
             cmdParse(cmd, merged, msgEvt); // Call command parser
         }
