@@ -8,6 +8,7 @@ var auth = require('./auth.json');
 const CHANNEL_FILE = 'channels.json'
 const TERMS_FILE = 'terms.json'
 const IGNORE_FILE = 'ignore.json'
+const PREFS_FILE = 'prefs.json'
 const CMD_PREFIX = 's!'
 
 
@@ -16,7 +17,7 @@ logger.remove(logger.transports.Console);
 logger.add(new logger.transports.Console, {
     colorize: true
 });
-logger.level = 'debug';
+logger.level = 'debug'; // LOGGER LEVEL
 
 // Initialize globals
 var bot;
@@ -37,7 +38,16 @@ readIgnoreList(function(ignore) {
     ignoreList = ignore;
 });
 
-var timerList = []
+
+var prefs;
+readObject(PREFS_FILE, {
+        cooldown: 1800000
+    }, function(preferences) {
+        prefs = preferences;
+    }
+);
+
+var cooldownTimes = {}
 
 ////
 // Discord Bot
@@ -95,9 +105,9 @@ function activateBot() {
 function scanMessage(msgEvt) {
     var matches = [];
     Object.keys(terms).forEach(function (term) {
-        if (!ignoreList.includes(term)) { // Account for ignore list
+        if (!ignoreList.includes(term) && !isCoolingDown(term, msgEvt.channelID)) { // Account for ignore list
             //Match if surrounded by non alphanumeric characters
-            var re = new RegExp('\W*' + term + '\W*','gi'); 
+            var re = new RegExp('\(\?\:\^\|\\W\)' + term + '\(\?\:\$\|\\W\)','gi');
             var match = msgEvt.message.match(re);
             if (match && match[0].length) { // Check for a match
                 matches.push(term);
@@ -114,6 +124,13 @@ function scanMessage(msgEvt) {
 // Print out definition(s) for a term
 function sendDefs(term, msg) {
     if (terms[term]) {
+        // Reset term cooldown
+        if (!cooldownTimes[msg.channelID]) {
+            cooldownTimes[msg.channelID] = {};
+        }
+        cooldownTimes[msg.channelID][term] = Date.now();
+        logger.log('debug', 'cooldowns changed: ' + cooldownTimes.toString());
+
         var defs = "";
         terms[term].forEach(function(def){
             defs += def + '\n';
@@ -132,6 +149,22 @@ function sendDefs(term, msg) {
         logger.log('debug', "attempted to print non-existent term '" + term + "'");
     }
 }
+
+
+// Checks if term is on cooldown
+function isCoolingDown(term, channelID) {
+    if (cooldownTimes[channelID] && cooldownTimes[channelID][term]) {
+        if (Date.now() - cooldownTimes[channelID][term] < prefs.cooldown) {
+            return true;
+        } else {
+            return false;
+        }
+    }
+    else {
+        return false;
+    }
+}
+
         
 
 ////
@@ -148,6 +181,7 @@ const MINUS_CHANNEL_HELP = CMD_PREFIX + "-channel";
 const HELP_HELP = CMD_PREFIX + "help";
 const DEFINE_HELP = CMD_PREFIX + "define <term>";
 const IGNORE_HELP = CMD_PREFIX + "ignore <term>[, <term>, ...]";
+const COOLDOWN_HELP = CMD_PREFIX + "cooldown [<number in minutes>]";
 
 
 // Pass execution to relevant function on per command basis
@@ -174,7 +208,7 @@ function cmdParse(cmd, args, msg) {
             // TODO
             break;
         case 'cooldown':
-            // TODO
+            cmdCooldown(args, msg); 
             break;
         case 'ignore':
             cmdIgnore(args, msg);
@@ -222,6 +256,8 @@ function cmdHelp(msg) {
             '`' + IGNORE_HELP + '`\n' +
             "Whitelisting channels - to add or remove a channel from active scanning\n" +
             '`' + PLUS_CHANNEL_HELP + '`\n`' + MINUS_CHANNEL_HELP + '`\n' +
+            "*cooldown* - To check cooldown or to change cooldown on auto detection\n" +
+            '`' + COOLDOWN_HELP + '`\n' +
             "*help* - To see these commands anytime\n" +
             '`' + HELP_HELP + '`'
     });
@@ -292,7 +328,7 @@ function cmdAdd(arg, msg) {
         // Split on ':', between term and definition
         args = arg.split(':');
         // Account for additional ':' after term is written
-        while (args.split > 2) {
+        while (args.length > 2) {
             args[1] += ':' + args[2];
             args.splice(2,1);
         }
@@ -467,6 +503,38 @@ function cmdIgnore(arg, msg) {
         bot.sendMessage({
             to: msg.channelID,
             message: INCORRECT_USAGE + '\n`' + IGNORE_HELP + '`'
+        });
+    }
+}
+
+
+// Prints or changes the cooldown time
+function cmdCooldown(args, msg) {
+    let timeConversion = 60000;
+    if (args) {
+        if (!isNaN(args.trim())) {
+            prefs.cooldown = Math.floor(Number(args.trim())*timeConversion);
+            bot.sendMessage({
+                to: msg.channelID,
+                message: 'Cooldown changed to ' + (prefs.cooldown / timeConversion).toFixed(1) + 'm'
+            });
+
+            logger.info('Cooldown changed to ' + prefs.cooldown);
+            writeObject(PREFS_FILE, prefs);
+        }
+        else {
+            bot.sendMessage({
+                to: msg.channelID,
+                message: args.trim() + ' is not a number. Use `' + COOLDOWN_HELP +'`'
+            });
+            
+        }
+
+    }
+    else {
+        bot.sendMessage({
+            to: msg.channelID,
+            message: 'Current cooldown is ' + (prefs.cooldown / timeConversion).toFixed(1) + 'm'
         });
     }
 }
