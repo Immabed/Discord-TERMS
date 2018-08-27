@@ -30,6 +30,8 @@ Now that you have added the bot, you can begin using it! Activate the bot using 
 
 I recommend finding a place to host the bot 24/7 so that you can always have access to the commands and features. You could try [Heroku's](https://devcenter.heroku.com/articles/getting-started-with-nodejs) free hosting service.
 
-## Licence
+## Licence and Support
 This program is provided as is, with no warranty. If you find issues you can tell me about them and I'll have a look when I get a chance, or you can just fix them yourself if feel adventurous!
+
+See `LICENCE` for specific details on the software licence.
 
