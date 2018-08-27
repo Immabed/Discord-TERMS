@@ -1,0 +1,11 @@
+{
+    "name": "TERMS",
+    "version": "0.1.0",
+    "description": "Terminology Encoding Reduction Machine for Space",
+    "main": "bot.js",
+    "author": "Brady Coles",
+    "dependencies": {
+        "discord.io": "https://github.com/woor/discord.io/tarball/gateway_v6",
+        "winston": "^3.0.0"
+    }
+}
