@@ -7,6 +7,7 @@ var auth = require('./auth.json');
 // Global Constants
 const CHANNEL_FILE = 'channels.json'
 const TERMS_FILE = 'terms.json'
+const IGNORE_FILE = 'ignore.json'
 const CMD_PREFIX = 's!'
 
 
@@ -30,6 +31,13 @@ readTerms(function(termsObject) {
     terms = termsObject;
     activateBot();
 });
+
+var ignoreList;
+readIgnoreList(function(ignore) {
+    ignoreList = ignore;
+});
+
+var timerList = []
 
 ////
 // Discord Bot
@@ -73,8 +81,9 @@ function activateBot() {
             
             cmdParse(cmd, merged, msgEvt); // Call command parser
         }
-        else {
-            // TODO - Call acronym parser
+        else if (userID != bot.id && channelList.includes(channelID)) {
+            // Message is not TERMS bot, and is in whitelisted channel
+            scanMessage(msgEvt);
         }
     });
 }
@@ -82,6 +91,25 @@ function activateBot() {
 ////
 // Term detection and printing
 ////
+
+// Scans a message for a term.
+function scanMessage(msgEvt) {
+    var matches = [];
+    Object.keys(terms).forEach(function (term) {
+        if (!ignoreList.includes(term)) { // Account for ignore list
+            //Match if surrounded by non alphanumeric characters
+            var re = new RegExp('\W*' + term + '\W*','gi'); 
+            var match = msgEvt.message.match(re);
+            if (match && match[0].length) { // Check for a match
+                matches.push(term);
+            }
+        }
+    });
+    if (matches.length) logger.log('debug', 'matches: ' + matches.toString());
+    for (let term in matches) {
+        sendDefs(matches[term], msgEvt);
+    }
+}
 
 
 // Print out definition(s) for a term
@@ -102,7 +130,7 @@ function sendDefs(term, msg) {
         });
     }
     else {
-        logging.log('debug', 'attempted to print non-existent term');
+        logger.log('debug', "attempted to print non-existent term '" + term + "'");
     }
 }
         
@@ -120,6 +148,7 @@ const PLUS_CHANNEL_HELP = CMD_PREFIX + "+channel";
 const MINUS_CHANNEL_HELP = CMD_PREFIX + "-channel";
 const HELP_HELP = CMD_PREFIX + "help";
 const DEFINE_HELP = CMD_PREFIX + "define <term>";
+const IGNORE_HELP = CMD_PREFIX + "ignore <term>[, <term>, ...]";
 
 
 // Pass execution to relevant function on per command basis
@@ -143,8 +172,13 @@ function cmdParse(cmd, args, msg) {
         case 'define':
             cmdDefine(args, msg);
         case 'edit':
+            // TODO
+            break;
+        case 'cooldown':
+            // TODO
             break;
         case 'ignore':
+            cmdIgnore(args, msg);
             break;
         case 'clone':
             cmdClone(args, msg);
@@ -171,8 +205,6 @@ function cmdDefine(args, msg) {
     }
 }
 
-
-
 // Prints command list with descriptions
 function cmdHelp(msg) {
     bot.sendMessage({
@@ -180,14 +212,16 @@ function cmdHelp(msg) {
         message:
             "**Commands**\n" +
             "*define* - Defines a term!\n" +
-            '`' + DEFINE_HELP + '`' +
+            '`' + DEFINE_HELP + '`\n' +
             "*add* - To add a new term and definition, or to add a definition to a term\n" +
             '`' + ADD_HELP + '`\n' +
             "*remove* - To remove a term and all its definitions\n" +
             '`' + REMOVE_HELP + '`\n' +
             "*clone* - To copy the definitions from one term to make a new term\n" +
             '`' + CLONE_HELP + '`\n' +
-            "Whitelisting channels - to add or remove a channel from active scanning" +
+            "*ignore* - To add or remove terms from the ignore list. Ignore list items aren't actively scanned, but can still be accessed using *define*\n" +
+            '`' + IGNORE_HELP + '`\n' +
+            "Whitelisting channels - to add or remove a channel from active scanning\n" +
             '`' + PLUS_CHANNEL_HELP + '`\n`' + MINUS_CHANNEL_HELP + '`\n' +
             "*help* - To see these commands anytime\n" +
             '`' + HELP_HELP + '`'
@@ -387,63 +421,114 @@ function cmdClone(arg, msg) {
     }
 }
 
+// Ignore (or stop ignoring) a term from scanned messages.
+function cmdIgnore(arg, msg) {
+    if (arg) { //ensure at least one term to remove.
+        args = arg.split(',');
+        args.forEach(function(term) {
+            term = term.trim();
+            if (terms[term]) { // Term exists
+                if (ignoreList.includes(term)) {
+                    ignoreList.splice(ignoreList.indexOf(term), 1);
+                
+                    bot.sendMessage({
+                        to: msg.channelID,
+                        message:'No longer ignoring term **' + term + '**' 
+                    });
+                
+                    logger.info('Removed term **' + term + '** from ignore list.');
+                }
+                else {
+                    ignoreList.push(term);
+                
+                    bot.sendMessage({
+                        to: msg.channelID,
+                        message:'Now ignoring term **' + term + '**' 
+                    });
+                
+                    logger.info('Added term **' + term + '** to ignore list.');
+                }
+                
+                writeTerms();
+            }
+            else { // Term doesn't exist
+                bot.sendMessage({
+                    to: msg.channelID,
+                    message:'Term **' + term + '** does not exist. Cannot be ignored. You can add it using `' + ADD_HELP + '`'
+                });
+                
+                logger.info("Attempted to ignore term that doesn't exist: '" + term + "'");
+            }
+        });
+    }
+    else {
+        // Improper syntax
+        logger.info("Wrong syntax on 'ignore' command");
+
+        bot.sendMessage({
+            to: msg.channelID,
+            message: INCORRECT_USAGE + '\n`' + IGNORE_HELP + '`'
+        });
+    }
+}
+
 
 ////
 // File Handlers
 ////
 
-// Reads channel list from file and passes list to callback function (fn)
+// Shorthands
+
 function readChannelList(fn) {
-    fs.exists(CHANNEL_FILE, function(exists) {
-        if (exists) {
-            fs.readFile(CHANNEL_FILE, 'utf8', function readFileCallback(err, data){
-                if (err) {
-                    logger.error(err);
-                }
-                fn(JSON.parse(data));
-                logger.info("Channel whitelist loaded from file.");
-            });
-        }
-        else {
-            fn([]);
-            logger.info("Channel whitelist file ("+ CHANNEL_FILE +") does not exist, creating empty whitelist.");
-        }
-    });
+    readObject(CHANNEL_FILE, [], fn);
 }
 
-// Writes channelList to file
 function writeChannelList() {
-    var json = JSON.stringify(channelList, null, 4);
-    fs.writeFile(CHANNEL_FILE, json, 'utf8', function() {
-        logger.info(CHANNEL_FILE +" updated")
-    });
+    writeObject(CHANNEL_FILE, channelList);
 }
 
+function readIgnoreList(fn) {
+    readObject(IGNORE_FILE, [], fn);
+}
 
-// Reads terms object from file and passes list to callback function (fn)
+function writeIgnoreList() {
+    writeObject(IGNORE_FILE, ignoreList);
+}
+
 function readTerms(fn) {
-    fs.exists(TERMS_FILE, function(exists) {
+    readObject(TERMS_FILE, {}, fn);
+}
+
+function writeTerms() {
+    writeObject(TERMS_FILE, terms);
+}
+
+// Reads object from file and passes to callback function (fn)
+function readObject(filename, empty, fn) {
+    fs.exists(filename, function(exists) {
         if (exists) {
-            fs.readFile(TERMS_FILE, 'utf8', function readFileCallback(err, data){
+            fs.readFile(filename, 'utf8', function readFileCallback(err, data){
                 if (err) {
                     logger.error(err);
                 }
                 fn(JSON.parse(data));
-                logger.info("Terms loaded from file.");
+                logger.info("Object loaded from file: " + filename);
             });
         }
         else {
-            fn({});
-            logger.info("Terms file ("+ TERMS_FILE +") does not exist, creating empty terms object.");
+            fn(empty);
+            logger.info("File ("+ filename +") does not exist, creating empty object.");
         }
     });
 }
 
-// Writes terms to file
-function writeTerms() {
-    var json = JSON.stringify(terms, null, 4);
-    fs.writeFile(TERMS_FILE, json, 'utf8', function() {
-        logger.info(TERMS_FILE + " updated")
+// Writes object to JSON file
+function writeObject(filename, object) {
+    var json = JSON.stringify(object, null, 4);
+    fs.writeFile(filename, json, 'utf8', function() {
+        logger.info(filename +" updated")
     });
 }
+
+
 
