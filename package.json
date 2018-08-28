@@ -1,6 +1,6 @@
 {
     "name": "TERMS",
-    "version": "0.1.0",
+    "version": "1.0.0",
     "description": "Terminology Encoding Reduction Machine for Space",
     "main": "bot.js",
     "author": "Brady Coles",
