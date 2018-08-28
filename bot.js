@@ -494,7 +494,7 @@ function cmdIgnore(arg, msg) {
                     logger.info('Added term **' + term + '** to ignore list.');
                 }
                 
-                writeTerms();
+                writeIgnoreList();
             }
             else { // Term doesn't exist
                 bot.sendMessage({
