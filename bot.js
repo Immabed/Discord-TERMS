@@ -114,39 +114,49 @@ function scanMessage(msgEvt) {
             }
         }
     });
-    if (matches.length) logger.log('debug', 'matches: ' + matches.toString());
-    for (let term in matches) {
-        sendDefs(matches[term], msgEvt);
+    if (matches.length) {
+        logger.log('debug', 'matches: ' + matches.toString());
+        sendDefs(matches, msgEvt);
     }
 }
 
 
-// Print out definition(s) for a term
-function sendDefs(term, msg) {
-    if (terms[term]) {
-        // Reset term cooldown
-        if (!cooldownTimes[msg.channelID]) {
-            cooldownTimes[msg.channelID] = {};
+// Print out definition(s) for multiple terms
+function sendDefs(termList, msg) {
+    if (!termList.length) return;
+    botMsg = {
+        to: msg.channelID,
+        embed: {
+            fields: []
         }
-        cooldownTimes[msg.channelID][term] = Date.now();
-        logger.log('debug', 'cooldowns changed: ' + cooldownTimes.toString());
-
-        var defs = "";
-        terms[term].forEach(function(def){
-            defs += def + '\n';
-        });
-        bot.sendMessage({
-            to: msg.channelID,
-            embed: {
-                fields: [{
-                    name: term,
-                    value: defs
-                }]
-            }
-        });
     }
-    else {
-        logger.log('debug', "attempted to print non-existent term '" + term + "'");
+    termList.forEach(function(term) {
+        if (terms[term]) {
+            // Reset term cooldown
+            if (!cooldownTimes[msg.channelID]) {
+                cooldownTimes[msg.channelID] = {};
+            }
+            cooldownTimes[msg.channelID][term] = Date.now();
+            logger.log('debug', 'cooldowns changed: ' + cooldownTimes.toString());
+
+            var defs = "";
+            terms[term].forEach(function(def){
+                defs += def + '\n';
+            });
+
+            // Add field to message for term
+            botMsg.embed.fields.push({
+                name: term,
+                value: defs
+            });
+        }
+        else {
+            logger.log('debug', "attempted to print non-existent term '" + term + "'");
+        }
+    });
+    // If at least one field has been added, send message
+    if (botMsg.embed.fields.length) {
+        bot.sendMessage(botMsg);
     }
 }
 
@@ -233,7 +243,7 @@ function cmdDefine(args, msg) {
     if (args) {
         args = args.trim();
         if (terms[args]) {
-            sendDefs(args, msg);
+            sendDefs([args], msg);
         }
     }
 }
