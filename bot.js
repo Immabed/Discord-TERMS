@@ -248,7 +248,7 @@ function cmdDefine(args, msg) {
         else {
             bot.sendMessage({
                 to: msg.channelID,
-                message: '**' args + '** is not a defined term. You can add it using `' +
+                message: '**' + args + '** is not a defined term. You can add it using `' +
                 ADD_HELP + '`'
             });
         }
