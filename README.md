@@ -11,7 +11,7 @@ TERMS is a node.js based discord bot, but it isn't designed to properly handle m
 
 ### Prerequisites
 - Node.js
-- discord.io module (install using npm)
+- discord.js module (install using npm)
 - winston module (install using npm)
 - A discord account
 

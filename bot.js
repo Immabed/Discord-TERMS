@@ -1,4 +1,4 @@
-var Discord = require('discord.io');
+var Discord = require('discord.js');
 var logger = require('winston');
 var fs = require('fs');
 var auth = require('./auth.json');
@@ -20,7 +20,7 @@ logger.add(new logger.transports.Console, {
 logger.level = 'debug'; // LOGGER LEVEL
 
 // Initialize globals
-var bot;
+const bot = new Discord.Client();
 
 var channelList; 
 readChannelList(function(channels) {
@@ -54,61 +54,61 @@ var cooldownTimes = {}
 ////
 function activateBot() {
     // Initialize Discord Bot
-    bot = new Discord.Client({
-        token: auth.token,
-        autorun: true
-    });
-    bot.on('ready', function (evt) {
-        logger.info('Connected')
-        logger.info('Logged in as: ');
-        logger.info(bot.username + ' - (' + bot.id + ')');
-    });
-    bot.on('message', function (user, userID, channelID, message, evt) {
-        //if (evt.author.bot) return;
-        
-        msgEvt = {
-            user: user,
-            userID: userID,
-            channelID: channelID,
-            message: message,
-            evt: evt
-        }
-        
-        // For bot commands
-        // Prefix will be 's!' (s for space)
-        if (message.substring(0, CMD_PREFIX.length) == CMD_PREFIX) {
-            var args = message.substring(CMD_PREFIX.length).split(' ');
-            var cmd = args[0]; // Get cmd
-            var args = args.slice(1); // Remove cmd from args
-            if (args.length) { // merge args
-                var merged = args.pop();
-                while (args.length) {
-                    merged = args.pop() + ' ' + merged;
-                }
-            }
-            else merged = "";
-            
-            cmdParse(cmd, merged, msgEvt); // Call command parser
-        }
-        else if (userID != bot.id && channelList.includes(channelID)) {
-            // Message is not TERMS bot, and is in whitelisted channel
-            scanMessage(msgEvt);
-        }
-    });
+    bot.login(auth.token);
 }
+
+bot.once('ready', function () {
+    logger.info('Connected')
+    logger.info('Logged in as: ');
+    logger.info(bot.username + ' - (' + bot.id + ')');
+});
+
+bot.on('message', function (message) {
+    //if (evt.author.bot) return;
+    
+    msgEvt = {
+        user: message.member,
+        userID: message.member.id,
+        channelID: message.channel.id,
+        message: message.content,
+        evt: message
+    }
+    
+    // For bot commands
+    // Prefix will be 's!' (s for space)
+    if (message.content.substring(0, CMD_PREFIX.length) == CMD_PREFIX) {
+        var args = message.content.substring(CMD_PREFIX.length).split(' ');
+        var cmd = args[0]; // Get cmd
+        var args = args.slice(1); // Remove cmd from args
+        if (args.length) { // merge args
+            var merged = args.pop();
+            while (args.length) {
+                merged = args.pop() + ' ' + merged;
+            }
+        }
+        else merged = "";
+        
+        cmdParse(cmd, merged, message); // Call command parser
+    }
+    else if (message.member.id != bot.user.id && channelList.includes(message.channel.id)) {
+        // Message is not TERMS bot, and is in whitelisted channel
+        scanMessage(message);
+    }
+});
+
 
 ////
 // Term detection and printing
 ////
 
 // Scans a message for a term.
-function scanMessage(msgEvt) {
+function scanMessage(message) {
     var matches = [];
     Object.keys(terms).forEach(function (term) {
-        if (!ignoreList.includes(term) && !isCoolingDown(term, msgEvt.channelID)) { // Account for ignore list
+        if (!ignoreList.includes(term) && !isCoolingDown(term, message.channel.id)) { // Account for ignore list
             //Match if surrounded by non alphanumeric characters
             var re = new RegExp('\(\?\:\^\|\\W\)' + term + '\(\?\:\$\|\\W\)','gi');
-            var match = msgEvt.message.match(re);
+            var match = message.content.match(re);
             if (match && match[0].length) { // Check for a match
                 matches.push(term);
             }
@@ -116,27 +116,22 @@ function scanMessage(msgEvt) {
     });
     if (matches.length) {
         logger.log('debug', 'matches: ' + matches.toString());
-        sendDefs(matches, msgEvt);
+        sendDefs(matches, message);
     }
 }
 
 
 // Print out definition(s) for multiple terms
-function sendDefs(termList, msg) {
+function sendDefs(termList, message) {
     if (!termList.length) return;
-    botMsg = {
-        to: msg.channelID,
-        embed: {
-            fields: []
-        }
-    }
+    var msgEmbed = new Discord.MessageEmbed();    
     termList.forEach(function(term) {
         if (terms[term]) {
             // Reset term cooldown
-            if (!cooldownTimes[msg.channelID]) {
-                cooldownTimes[msg.channelID] = {};
+            if (!cooldownTimes[message.channel.id]) {
+                cooldownTimes[message.channel.id] = {};
             }
-            cooldownTimes[msg.channelID][term] = Date.now();
+            cooldownTimes[message.channel.id][term] = Date.now();
             logger.log('debug', 'cooldowns changed: ' + cooldownTimes.toString());
 
             var defs = "";
@@ -145,18 +140,15 @@ function sendDefs(termList, msg) {
             });
 
             // Add field to message for term
-            botMsg.embed.fields.push({
-                name: term,
-                value: defs
-            });
+            msgEmbed.addField(term,defs);
         }
         else {
             logger.log('debug', "attempted to print non-existent term '" + term + "'");
         }
     });
     // If at least one field has been added, send message
-    if (botMsg.embed.fields.length) {
-        bot.sendMessage(botMsg);
+    if (msgEmbed.fields.length) {
+        message.channel.send(msgEmbed);
     }
 }
 
@@ -195,71 +187,62 @@ const COOLDOWN_HELP = CMD_PREFIX + "cooldown [<number in minutes>]";
 
 
 // Pass execution to relevant function on per command basis
-function cmdParse(cmd, args, msg) {
+function cmdParse(cmd, args, message) {
     switch(cmd) {
         case 'test':
-            cmdTest(msg);
+            cmdTest(message);
             break;
         case '+channel':
-            cmdPlusChannel(msg);
+            cmdPlusChannel(message);
             break;
         case '-channel':
-            cmdMinusChannel(msg);
+            cmdMinusChannel(message);
             break;
         case 'add':
-            cmdAdd(args, msg);
+            cmdAdd(args, message);
             break;
         case 'remove':
-            cmdRemove(args, msg);
+            cmdRemove(args, message);
             break;
         case 'define':
-            cmdDefine(args, msg);
+            cmdDefine(args, message);
         case 'edit':
             // TODO
             break;
         case 'cooldown':
-            cmdCooldown(args, msg); 
+            cmdCooldown(args, message); 
             break;
         case 'ignore':
-            cmdIgnore(args, msg);
+            cmdIgnore(args, message);
             break;
         case 'clone':
-            cmdClone(args, msg);
+            cmdClone(args, message);
             break;
         case 'help':
-            cmdHelp(msg);
+            cmdHelp(message);
             break;
         default:
-            bot.sendMessage({
-                to: msg.channelID,
-                message: "Incorrect Command, use " + CMD_PREFIX + "help to see commands."
-            });
+            message.channel.send("Incorrect Command, use " + CMD_PREFIX + "help to see commands.");
             break;
     }
 }
 
 // Prints definition of a term
-function cmdDefine(args, msg) {
+function cmdDefine(args, message) {
     if (args) {
         args = args.trim();
         if (terms[args]) {
-            sendDefs([args], msg);
+            sendDefs([args], message);
         }
         else {
-            bot.sendMessage({
-                to: msg.channelID,
-                message: '**' + args + '** is not a defined term. You can add it using `' +
-                ADD_HELP + '`'
-            });
+            message.channel.send('**' + args + '** is not a defined term. You can add it using `' + ADD_HELP + '`');
         }
     }
 }
 
 // Prints command list with descriptions
-function cmdHelp(msg) {
-    bot.sendMessage({
-        to:msg.channelID,
-        message:
+function cmdHelp(message) {
+    message.channel.send(
             "**Commands**\n" +
             "*define* - Defines a term!\n" +
             '`' + DEFINE_HELP + '`\n' +
@@ -277,69 +260,54 @@ function cmdHelp(msg) {
             '`' + COOLDOWN_HELP + '`\n' +
             "*help* - To see these commands anytime\n" +
             '`' + HELP_HELP + '`'
-    });
+    );
 }
 
 // Prints hello world. Proves bot is working.
-function cmdTest(msg) {
-    bot.sendMessage({
-        to: msg.channelID,
-        message: 'Hello World!'
-    });
+function cmdTest(message) {
+    message.channel.send('Hello World!');
 }
 
 // Removes a channel to the whitelist
-function cmdMinusChannel(msg) {
-    channelName = bot.channels[msg.channelID].name;
+function cmdMinusChannel(message) {
+    channelName = message.channel.name;
 
     logger.info('Attempting to remove channel from whitelist ' + channelName);
 
-    if (channelList.includes(msg.channelID)) {
-        channelList.splice(channelList.indexOf(msg.channelID), 1);
+    if (channelList.includes(message.channel.id)) {
+        channelList.splice(channelList.indexOf(message.channel.id), 1);
         writeChannelList();
         
         // Confirmation Message
-        bot.sendMessage({
-            to: msg.channelID,
-            message: 'Channel *' + channelName + '* removed from whitelist.'
-        });
+        message.channel.send('Channel *' + channelName + '* removed from whitelist.');
     }
     else {
         // Comfirmation Message
-        bot.sendMessage({
-            to: msg.channelID,
-            message: 'Channel *' + channelName + '* already inactive.'
-        });
+        message.channel.send('Channel *' + channelName + '* already inactive.');
     }
 }
 
 // Adds a channel to the whitelist
-function cmdPlusChannel(msg) {
-    channelName = bot.channels[msg.channelID].name;
+function cmdPlusChannel(message) {
+    channelName = message.channel.name;
 
     logger.info('Attempting to whitelist channel ' + channelName);
 
-    if (!channelList.includes(msg.channelID)) {
-        channelList.push(msg.channelID);
+    if (!channelList.includes(message.channel.id)) {
+        channelList.push(message.channel.id);
         writeChannelList();
         
         // Confirmation Message
-        bot.sendMessage({
-            to: msg.channelID,
-            message: 'Channel *' + channelName + '* added to whitelist.'
-        });
+        message.channel.send('Channel *' + channelName + '* added to whitelist.');
     }
     else {
         // Comfirmation Message
-        bot.sendMessage({
-            to: msg.channelID,
-            message: 'Channel *' + channelName + '* already active.'
-        });
+        message.channel.send('Channel *' + channelName + '* already active.');
     }
 }
 
 // Adds a new term and definition
-function cmdAdd(arg, msg) {
+function cmdAdd(arg, message) {
     logger.log('debug', 'arg for add: ' + arg);
     if (arg && arg.includes(':')) {
         // Split on ':', between term and definition
@@ -357,10 +325,7 @@ function cmdAdd(arg, msg) {
             // Term exists, add another definition
             terms[args[0]].push(args[1]);
 
-            bot.sendMessage({
-                to: msg.channelID,
-                message: 'Added new definition to **' + args[0] + '**'
-            });
+            message.channel.send('Added new definition to **' + args[0] + '**');
 
             logger.info('Adding new definition to term: ' + args[0]);
         }
@@ -368,13 +333,9 @@ function cmdAdd(arg, msg) {
             // Term is new, add to list
             terms[args[0]] = [args[1]];
             
-            bot.sendMessage({
-                to: msg.channelID,
-                message: 'Added new term: **' + args[0] + '**'
-            });
+            message.channel.send('Added new term: **' + args[0] + '**');
             
             logger.info('Adding new term: ' + args[0]);
-            
         }
         // Term added, write changes to file
         writeTerms();
@@ -383,15 +344,12 @@ function cmdAdd(arg, msg) {
         // Improper syntax
         logger.info("Wrong syntax on 'add' command");
 
-        bot.sendMessage({
-            to: msg.channelID,
-            message: INCORRECT_USAGE + '\n`' + ADD_HELP + '`'
-        });
+        message.channel.send(INCORRECT_USAGE + '\n`' + ADD_HELP + '`');
     }
 }
 
 // Remove a term (and all definitions) from list
-function cmdRemove(arg, msg) {
+function cmdRemove(arg, message) {
     if (arg) { //ensure at least one term to remove.
         args = arg.split(',');
         args.forEach(function(term) {
@@ -400,20 +358,14 @@ function cmdRemove(arg, msg) {
                 count = terms[term].length
                 delete terms[term]
                 
-                bot.sendMessage({
-                    to: msg.channelID,
-                    message:'Removed term **' + term + '** with ' + count + ' definitions.'
-                });
+                message.channel.send('Removed term **' + term + '** with ' + count + ' definitions.');
                 
                 logger.info('Removed term **' + term + '** with ' + count + ' definitions.');
                 
                 writeTerms();
             }
             else { // Term doesn't exist
-                bot.sendMessage({
-                    to: msg.channelID,
-                    message:'Term **' + term + '** does not exist. Cannot be removed.'
-                });
+                message.channel.send('Term **' + term + '** does not exist. Cannot be removed.');
                 
                 logger.info("Attempted to remove term that doesn't exist: '" + term + "'");
             }
@@ -423,15 +375,12 @@ function cmdRemove(arg, msg) {
         // Improper syntax
         logger.info("Wrong syntax on 'remove' command");
 
-        bot.sendMessage({
-            to: msg.channelID,
-            message: INCORRECT_USAGE + '\n`' + REMOVE_HELP + '`'
-        });
+        message.channel.send(INCORRECT_USAGE + '\n`' + REMOVE_HELP + '`');
     }
 }
 
 // Clones the definitions from one term to another
-function cmdClone(arg, msg) {
+function cmdClone(arg, message) {
     if (arg && arg.includes(',') && arg.split(',').length == 2) {
         args = arg.split(',');
         args[0] = args[0].trim();
@@ -440,24 +389,15 @@ function cmdClone(arg, msg) {
             terms[args[1]] = terms[args[0]];
             writeTerms();
             
-            bot.sendMessage({
-                to: msg.channelID,
-                message: 'Successfully added **' + args[1] + '** from **' + args[0] +'**'
-            });
+            message.channel.send('Successfully added **' + args[1] + '** from **' + args[0] +'**');
 
             logger.info("Cloned '" + args[0] + "' to create '" + args[1] + "'");
         }
         else if (args[1]) {
-            bot.sendMessage({
-                to: msg.channelID,
-                message: '**' + args[1] + '** already exists, clone failed.'
-            });
+            message.channel.send('**' + args[1] + '** already exists, clone failed.');
         }
         else if (!args[0]) {
-            bot.sendMessage({
-                to: msg.channelID,
-                message: '**' + args[0] + '** does not exist, cannot be cloned.'
-            });
+            message.channel.send('**' + args[0] + '** does not exist, cannot be cloned.');
         }
         else {
             logging.warn('Unkown error in determining if ' + args[0] + 
@@ -465,16 +405,13 @@ function cmdClone(arg, msg) {
         }
     }
     else {
-        bot.sendMessage({
-            to: msg.channelID,
-            message: INCORRECT_USAGE + '\n`' + CLONE_HELP + '`'
-        });
+        message.channel.send(INCORRECT_USAGE + '\n`' + CLONE_HELP + '`');
         logger.info("Clone attempt failed with incorrect syntax");
     }
 }
 
 // Ignore (or stop ignoring) a term from scanned messages.
-function cmdIgnore(arg, msg) {
+function cmdIgnore(arg, message) {
     if (arg) { //ensure at least one term to remove.
         args = arg.split(',');
         args.forEach(function(term) {
@@ -483,20 +420,14 @@ function cmdIgnore(arg, msg) {
                 if (ignoreList.includes(term)) {
                     ignoreList.splice(ignoreList.indexOf(term), 1);
                 
-                    bot.sendMessage({
-                        to: msg.channelID,
-                        message:'No longer ignoring term **' + term + '**' 
-                    });
+                    message.channel.send('No longer ignoring term **' + term + '**');
                 
                     logger.info('Removed term **' + term + '** from ignore list.');
                 }
                 else {
                     ignoreList.push(term);
                 
-                    bot.sendMessage({
-                        to: msg.channelID,
-                        message:'Now ignoring term **' + term + '**' 
-                    });
+                    message.channel.send('Now ignoring term **' + term + '**');
                 
                     logger.info('Added term **' + term + '** to ignore list.');
                 }
@@ -504,10 +435,7 @@ function cmdIgnore(arg, msg) {
                 writeIgnoreList();
             }
             else { // Term doesn't exist
-                bot.sendMessage({
-                    to: msg.channelID,
-                    message:'Term **' + term + '** does not exist. Cannot be ignored. You can add it using `' + ADD_HELP + '`'
-                });
+                message.channel.send('Term **' + term + '** does not exist. Cannot be ignored. You can add it using `' + ADD_HELP + '`');
                 
                 logger.info("Attempted to ignore term that doesn't exist: '" + term + "'");
             }
@@ -517,42 +445,29 @@ function cmdIgnore(arg, msg) {
         // Improper syntax
         logger.info("Wrong syntax on 'ignore' command");
 
-        bot.sendMessage({
-            to: msg.channelID,
-            message: INCORRECT_USAGE + '\n`' + IGNORE_HELP + '`'
-        });
+        message.channel.send(INCORRECT_USAGE + '\n`' + IGNORE_HELP + '`');
     }
 }
 
 
 // Prints or changes the cooldown time
-function cmdCooldown(args, msg) {
+function cmdCooldown(args, message) {
     let timeConversion = 60000;
     if (args) {
         if (!isNaN(args.trim())) {
             prefs.cooldown = Math.floor(Number(args.trim())*timeConversion);
-            bot.sendMessage({
-                to: msg.channelID,
-                message: 'Cooldown changed to ' + (prefs.cooldown / timeConversion).toFixed(1) + 'm'
-            });
+            message.channel.send('Cooldown changed to ' + (prefs.cooldown / timeConversion).toFixed(1) + 'm');
 
             logger.info('Cooldown changed to ' + prefs.cooldown);
             writeObject(PREFS_FILE, prefs);
         }
         else {
-            bot.sendMessage({
-                to: msg.channelID,
-                message: args.trim() + ' is not a number. Use `' + COOLDOWN_HELP +'`'
-            });
-            
+            message.channel.send(args.trim() + ' is not a number. Use `' + COOLDOWN_HELP +'`');
         }
 
     }
     else {
-        bot.sendMessage({
-            to: msg.channelID,
-            message: 'Current cooldown is ' + (prefs.cooldown / timeConversion).toFixed(1) + 'm'
-        });
+        message.channel.send('Current cooldown is ' + (prefs.cooldown / timeConversion).toFixed(1) + 'm');
     }
 }
 
