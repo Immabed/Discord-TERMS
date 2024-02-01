@@ -1,12 +1,11 @@
 {
     "name": "TERMS",
-    "version": "1.1.0",
+    "version": "1.2.0",
     "description": "Terminology Encoding Reduction Machine for Space",
     "main": "bot.js",
     "author": "Brady Coles",
     "dependencies": {
-        "discord.js": "^12.2.0",
-        "winston": "^3.3.3"
+        "discord.js": "^14.14.1"
     },
     "licence": "MIT",
     "scripts": {

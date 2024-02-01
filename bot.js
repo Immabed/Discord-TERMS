@@ -1,5 +1,4 @@
 var Discord = require('discord.js');
-var logger = require('winston');
 var fs = require('fs');
 var auth = require('./auth.json');
 
@@ -12,15 +11,14 @@ const PREFS_FILE = 'prefs.json'
 const CMD_PREFIX = 's!'
 
 
-// Configure logger settings
-logger.remove(logger.transports.Console);
-logger.add(new logger.transports.Console, {
-    colorize: true
+// Initialize Discord Bot
+const bot = new Discord.Client({
+    intents: [
+        Discord.GatewayIntentBits.Guilds,
+        Discord.GatewayIntentBits.GuildMessages,
+        Discord.GatewayIntentBits.MessageContent,
+    ]
 });
-logger.level = 'debug'; // LOGGER LEVEL
-
-// Initialize globals
-const bot = new Discord.Client();
 
 var channelList; 
 readChannelList(function(channels) {
@@ -58,21 +56,14 @@ function activateBot() {
 }
 
 bot.once('ready', function () {
-    logger.info('Connected')
-    logger.info('Logged in as: ');
-    logger.info(bot.username + ' - (' + bot.id + ')');
+    console.log('Connected')
+    console.log('Logged in as: ');
+    console.log(bot.user.username + ' - (' + bot.user.id + ')');
 });
 
-bot.on('message', function (message) {
-    //if (evt.author.bot) return;
-    
-    msgEvt = {
-        user: message.member,
-        userID: message.member.id,
-        channelID: message.channel.id,
-        message: message.content,
-        evt: message
-    }
+bot.on('messageCreate', function (message) {
+    //I'm not sure this works, disabling for now. Supposed to weed out bots.
+    //if (!message.member) return;
     
     // For bot commands
     // Prefix will be 's!' (s for space)
@@ -115,7 +106,6 @@ function scanMessage(message) {
         }
     });
     if (matches.length) {
-        logger.log('debug', 'matches: ' + matches.toString());
         sendDefs(matches, message);
     }
 }
@@ -124,7 +114,7 @@ function scanMessage(message) {
 // Print out definition(s) for multiple terms
 function sendDefs(termList, message) {
     if (!termList.length) return;
-    var msgEmbed = new Discord.MessageEmbed();    
+    var msgEmbed = new Discord.EmbedBuilder();    
     termList.forEach(function(term) {
         if (terms[term]) {
             // Reset term cooldown
@@ -132,7 +122,6 @@ function sendDefs(termList, message) {
                 cooldownTimes[message.channel.id] = {};
             }
             cooldownTimes[message.channel.id][term] = Date.now();
-            logger.log('debug', 'cooldowns changed: ' + cooldownTimes.toString());
 
             var defs = "";
             terms[term].forEach(function(def){
@@ -140,15 +129,15 @@ function sendDefs(termList, message) {
             });
 
             // Add field to message for term
-            msgEmbed.addField(term,defs);
+            msgEmbed.addFields([{name: term,value: defs}]);
         }
         else {
-            logger.log('debug', "attempted to print non-existent term '" + term + "'");
+            console.error("attempted to print non-existent term '" + term + "'");
         }
     });
     // If at least one field has been added, send message
-    if (msgEmbed.fields.length) {
-        message.channel.send(msgEmbed);
+    if (msgEmbed.length) {
+        message.channel.send({embeds: [msgEmbed]});
     }
 }
 
@@ -238,6 +227,10 @@ function cmdDefine(args, message) {
             message.channel.send('**' + args + '** is not a defined term. You can add it using `' + ADD_HELP + '`');
         }
     }
+    else {
+        message.channel.send(INCORRECT_USAGE + '\n`' + DEFINE_HELP + '`');
+    }
+
 }
 
 // Prints command list with descriptions
@@ -272,7 +265,7 @@ function cmdTest(message) {
 function cmdMinusChannel(message) {
     channelName = message.channel.name;
 
-    logger.info('Attempting to remove channel from whitelist ' + channelName);
+    console.log('Attempting to remove channel from whitelist ' + channelName);
 
     if (channelList.includes(message.channel.id)) {
         channelList.splice(channelList.indexOf(message.channel.id), 1);
@@ -291,7 +284,7 @@ function cmdMinusChannel(message) {
 function cmdPlusChannel(message) {
     channelName = message.channel.name;
 
-    logger.info('Attempting to whitelist channel ' + channelName);
+    console.log('Attempting to whitelist channel ' + channelName);
 
     if (!channelList.includes(message.channel.id)) {
         channelList.push(message.channel.id);
@@ -308,7 +301,6 @@ function cmdPlusChannel(message) {
 
 // Adds a new term and definition
 function cmdAdd(arg, message) {
-    logger.log('debug', 'arg for add: ' + arg);
     if (arg && arg.includes(':')) {
         // Split on ':', between term and definition
         args = arg.split(':');
@@ -327,7 +319,7 @@ function cmdAdd(arg, message) {
 
             message.channel.send('Added new definition to **' + args[0] + '**');
 
-            logger.info('Adding new definition to term: ' + args[0]);
+            console.log('Adding new definition to term: ' + args[0]);
         }
         else {
             // Term is new, add to list
@@ -335,14 +327,14 @@ function cmdAdd(arg, message) {
             
             message.channel.send('Added new term: **' + args[0] + '**');
             
-            logger.info('Adding new term: ' + args[0]);
+            console.log('Adding new term: ' + args[0]);
         }
         // Term added, write changes to file
         writeTerms();
     }
     else {
         // Improper syntax
-        logger.info("Wrong syntax on 'add' command");
+        console.log("Wrong syntax on 'add' command");
 
         message.channel.send(INCORRECT_USAGE + '\n`' + ADD_HELP + '`');
     }
@@ -360,20 +352,20 @@ function cmdRemove(arg, message) {
                 
                 message.channel.send('Removed term **' + term + '** with ' + count + ' definitions.');
                 
-                logger.info('Removed term **' + term + '** with ' + count + ' definitions.');
+                console.log('Removed term **' + term + '** with ' + count + ' definitions.');
                 
                 writeTerms();
             }
             else { // Term doesn't exist
                 message.channel.send('Term **' + term + '** does not exist. Cannot be removed.');
                 
-                logger.info("Attempted to remove term that doesn't exist: '" + term + "'");
+                console.log("Attempted to remove term that doesn't exist: '" + term + "'");
             }
         });
     }
     else {
         // Improper syntax
-        logger.info("Wrong syntax on 'remove' command");
+        console.log("Wrong syntax on 'remove' command");
 
         message.channel.send(INCORRECT_USAGE + '\n`' + REMOVE_HELP + '`');
     }
@@ -391,7 +383,7 @@ function cmdClone(arg, message) {
             
             message.channel.send('Successfully added **' + args[1] + '** from **' + args[0] +'**');
 
-            logger.info("Cloned '" + args[0] + "' to create '" + args[1] + "'");
+            console.log("Cloned '" + args[0] + "' to create '" + args[1] + "'");
         }
         else if (args[1]) {
             message.channel.send('**' + args[1] + '** already exists, clone failed.');
@@ -406,7 +398,7 @@ function cmdClone(arg, message) {
     }
     else {
         message.channel.send(INCORRECT_USAGE + '\n`' + CLONE_HELP + '`');
-        logger.info("Clone attempt failed with incorrect syntax");
+        console.log("Clone attempt failed with incorrect syntax");
     }
 }
 
@@ -422,14 +414,14 @@ function cmdIgnore(arg, message) {
                 
                     message.channel.send('No longer ignoring term **' + term + '**');
                 
-                    logger.info('Removed term **' + term + '** from ignore list.');
+                    console.log('Removed term **' + term + '** from ignore list.');
                 }
                 else {
                     ignoreList.push(term);
                 
                     message.channel.send('Now ignoring term **' + term + '**');
                 
-                    logger.info('Added term **' + term + '** to ignore list.');
+                    console.log('Added term **' + term + '** to ignore list.');
                 }
                 
                 writeIgnoreList();
@@ -437,13 +429,13 @@ function cmdIgnore(arg, message) {
             else { // Term doesn't exist
                 message.channel.send('Term **' + term + '** does not exist. Cannot be ignored. You can add it using `' + ADD_HELP + '`');
                 
-                logger.info("Attempted to ignore term that doesn't exist: '" + term + "'");
+                console.log("Attempted to ignore term that doesn't exist: '" + term + "'");
             }
         });
     }
     else {
         // Improper syntax
-        logger.info("Wrong syntax on 'ignore' command");
+        console.log("Wrong syntax on 'ignore' command");
 
         message.channel.send(INCORRECT_USAGE + '\n`' + IGNORE_HELP + '`');
     }
@@ -458,7 +450,7 @@ function cmdCooldown(args, message) {
             prefs.cooldown = Math.floor(Number(args.trim())*timeConversion);
             message.channel.send('Cooldown changed to ' + (prefs.cooldown / timeConversion).toFixed(1) + 'm');
 
-            logger.info('Cooldown changed to ' + prefs.cooldown);
+            console.log('Cooldown changed to ' + prefs.cooldown);
             writeObject(PREFS_FILE, prefs);
         }
         else {
@@ -504,19 +496,19 @@ function writeTerms() {
 
 // Reads object from file and passes to callback function (fn)
 function readObject(filename, empty, fn) {
-    fs.exists(filename, function(exists) {
-        if (exists) {
+    fs.stat(filename, function(err, stats) {
+        if (stats.isFile()) {
             fs.readFile(filename, 'utf8', function readFileCallback(err, data){
                 if (err) {
-                    logger.error(err);
+                    console.error(err);
                 }
                 fn(JSON.parse(data));
-                logger.info("Object loaded from file: " + filename);
+                console.log("Object loaded from file: " + filename);
             });
         }
         else {
             fn(empty);
-            logger.info("File ("+ filename +") does not exist, creating empty object.");
+            console.log("File ("+ filename +") does not exist, creating empty object.");
         }
     });
 }
@@ -525,7 +517,7 @@ function readObject(filename, empty, fn) {
 function writeObject(filename, object) {
     var json = JSON.stringify(object, null, 4);
     fs.writeFile(filename, json, 'utf8', function() {
-        logger.info(filename +" updated")
+        console.log(filename +" updated")
     });
 }
 
